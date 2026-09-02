@@ -47,7 +47,6 @@
   #svg-container { transform-origin: center center; }
   #svg-container svg { overflow: visible; }
   
-  /* SVG内部の余計なテキスト・メタ情報を完全非表示化 */
   #svg-container text,
   #svg-container desc,
   #svg-container metadata,
@@ -55,7 +54,6 @@
     display: none !important;
   }
 
-  /* 通常キー（チャコールグレー） */
   #svg-container path, #svg-container rect, #svg-container polygon {
     pointer-events: all !important;
     fill: #2c313c !important;
@@ -63,13 +61,11 @@
     stroke-width: 1.5px !important;
   }
 
-  /* 親指・外列（インディゴブルー） */
   #svg-container .is-mod {
     fill: #1d3557 !important;
     stroke: #457b9d !important;
   }
 
-  /* 単体タップ（通常：緑 / モディファイア：青） */
   #svg-container .key-pressed {
     fill: #10b981 !important;
     stroke: #ffffff !important;
@@ -78,7 +74,6 @@
     fill: #00b4d8 !important;
     stroke: #ffffff !important;
   }
-  /* 同時押し（アンバーゴールド） */
   #svg-container .combo-pressed {
     fill: #f59e0b !important;
     stroke: #ffffff !important;
@@ -189,7 +184,6 @@
     setStatus(isPalmFilterOn ? 'パーム保護: 有効' : 'パーム保護: 完全無効');
   }
 
-  // 結合されたErgogenのSVGパスを個別のキー要素へ分解
   function decomposeSvgPaths(svg) {
     const paths = Array.from(svg.querySelectorAll('path'));
     paths.forEach(pathEl => {
@@ -200,7 +194,7 @@
       if (subpaths && subpaths.length > 1) {
         const parent = pathEl.parentNode;
         subpaths.forEach(subD => {
-          const newPath = document.createElementNS('[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)', 'path');
+          const newPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
           newPath.setAttribute('d', subD.trim());
           parent.insertBefore(newPath, pathEl);
         });
@@ -209,7 +203,6 @@
     });
   }
 
-  // DOMParserによる安全なSVG抽出とゴミの排除
   document.getElementById('file-input').addEventListener('change', function(e) {
     resumeAudio();
     const file = e.target.files[0];
@@ -226,7 +219,6 @@
         return;
       }
 
-      // メタデータ・テキストタグ・不要ノードを完全除去
       svg.querySelectorAll('desc, metadata, title, text').forEach(el => el.remove());
 
       const container = document.getElementById('svg-container');
