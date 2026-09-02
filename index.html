@@ -8,22 +8,37 @@
 <title>Ergogen iPad Tester</title>
 <style>
   * { box-sizing: border-box; touch-action: none; -webkit-user-select: none; user-select: none; }
-  body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background: #121212; font-family: -apple-system, sans-serif; color: #fff; }
+  body, html {
+    margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden;
+    background: #141619; /* デスクマット調のダークスレート */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #f1f3f5;
+  }
   
-#toolbar {
+  #toolbar {
     position: absolute; top: 12px; left: 12px; z-index: 100;
-    display: flex; gap: 8px; align-items: center; background: rgba(30,30,30,0.85);
-    padding: 8px 12px; border-radius: 12px; backdrop-filter: blur(10px);
-    touch-action: auto; /* 追加 */
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    background: rgba(28, 32, 38, 0.92);
+    padding: 8px 14px; border-radius: 12px; backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    touch-action: auto;
   }
-  #toolbar * {
-    touch-action: auto; /* 追加 */
-  }  button, label {
-    background: #2c2c2e; color: #fff; border: 1px solid #3a3a3c;
-    padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
+  #toolbar * { touch-action: auto; }
+  button, label {
+    background: #2b303a; color: #f1f3f5; border: 1px solid #3e4451;
+    padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
   }
-  button.active { background: #0a84ff; border-color: #0a84ff; }
+  button.active { background: #007aff; border-color: #007aff; color: #fff; }
+  button.mode-toggle.active { background: #ff9500; border-color: #ff9500; color: #fff; }
   input[type="file"] { display: none; }
+
+  #status-indicator {
+    font-size: 12px; color: #9aa0a6; display: flex; gap: 12px; align-items: center; margin-left: 4px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .dot-normal { background: #3b4252; border: 1px solid #60687a; }
+  .dot-mod { background: #264a7f; border: 1px solid #4a7bbd; }
 
   #stage {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -31,10 +46,35 @@
   }
   #svg-container { transform-origin: center center; }
   #svg-container svg { overflow: visible; }
-  #svg-container rect, #svg-container path {
-    fill: #242426; stroke: #48484a; stroke-width: 1px; transition: fill 0.05s, transform 0.05s;
+  
+  /* キーの配色・コントラスト（タッチすり抜けを防止） */
+  #svg-container path, #svg-container rect, #svg-container polygon {
+    pointer-events: all !important;
+    fill: #2c313c !important; /* 通常キー：くっきりとしたチャコールグレー */
+    stroke: #525a6b !important;
+    stroke-width: 1.5px !important;
+    cursor: pointer;
   }
-  .key-pressed { fill: #30d158 !important; stroke: #fff !important; }
+
+  /* 親指・外列（モディファイアキー）：インディゴブルー */
+  #svg-container .is-mod {
+    fill: #1d3557 !important;
+    stroke: #457b9d !important;
+  }
+
+  /* タッチ時のハイライト色 */
+  .key-pressed {
+    fill: #10b981 !important; /* 通常単体：エメラルドグリーン */
+    stroke: #ecfdf5 !important;
+  }
+  .key-pressed.is-mod {
+    fill: #00b4d8 !important; /* モディファイア単体：シアンブルー */
+    stroke: #caf0f8 !important;
+  }
+  .combo-pressed {
+    fill: #f59e0b !important; /* 同時押し成功：鮮やかなアンバーゴールド */
+    stroke: #fffbeb !important;
+  }
 </style>
 </head>
 <body>
@@ -44,7 +84,11 @@
   <input type="file" id="file-input" accept=".svg">
   <button id="btn-mini" onclick="setPreset('mini')">iPad mini</button>
   <button id="btn-air" onclick="setPreset('air')">iPad Air</button>
-  <span style="font-size: 12px; color: #8e8e93; margin-left: 4px;">音: ON / パーム排除: ON</span>
+  <button id="btn-mode" class="mode-toggle" onclick="toggleEditMode()">🔧 キー割当切替: OFF</button>
+  <div id="status-indicator">
+    <span><span class="dot dot-normal"></span>通常</span>
+    <span><span class="dot dot-mod"></span>外列/親指</span>
+  </div>
 </div>
 
 <div id="stage">
@@ -52,30 +96,65 @@
 </div>
 
 <script>
-  // iPadのCSSピクセルあたりのmm換算（物理PPI / devicePixelRatio / 25.4）
-  // iPad mini (8.3"): 326ppi / 2 = 163pt/in -> 6.417 px/mm
-  // iPad Air (10.9"/11"): 264ppi / 2 = 132pt/in -> 5.197 px/mm
   const SCALE_FACTORS = {
-    mini: 6.4173,
-    air: 5.1969
+    mini: 6.4173, // 163 pt/in
+    air: 5.1969   // 132 pt/in
   };
   let currentDevice = 'mini';
+  let isEditMode = false;
 
-  // Web Audio API による打鍵音（メカニカル風のクリック音）
+  // Web Audio API（3種類の打鍵音）
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  function playKeyClick() {
+  
+  function resumeAudio() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  // 1. 通常キータッチ音（メカニカル風のコトッ音）
+  function playNormalSound() {
+    resumeAudio();
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = 'triangle';
-    osc.frequency.setValueAtTime(140, audioCtx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.03);
+    osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(45, audioCtx.currentTime + 0.04);
     gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
     osc.connect(gain);
     gain.connect(audioCtx.destination);
     osc.start();
-    osc.stop(audioCtx.currentTime + 0.03);
+    osc.stop(audioCtx.currentTime + 0.04);
+  }
+
+  // 2. モディファイアキータッチ音（低めの重いクリック）
+  function playModSound() {
+    resumeAudio();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(90, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.05);
+    gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.05);
+  }
+
+  // 3. コンビネーション同時押し音（高音のチーン！というチャイム）
+  function playComboSound() {
+    resumeAudio();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(660, audioCtx.currentTime); // E5の高音
+    gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.18);
   }
 
   function setPreset(device) {
@@ -86,7 +165,14 @@
   }
   setPreset('mini');
 
-  // SVGの読み込み
+  function toggleEditMode() {
+    isEditMode = !isEditMode;
+    const btn = document.getElementById('btn-mode');
+    btn.className = isEditMode ? 'mode-toggle active' : 'mode-toggle';
+    btn.innerText = isEditMode ? '🔧 キー割当切替: ON' : '🔧 キー割当切替: OFF';
+  }
+
+  // SVG読込と要素の自動認識
   document.getElementById('file-input').addEventListener('change', function(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -94,74 +180,117 @@
     reader.onload = function(evt) {
       const container = document.getElementById('svg-container');
       container.innerHTML = evt.target.result;
+      setupKeyElements();
       applyScale();
     };
     reader.readAsText(file);
   });
 
+  function setupKeyElements() {
+    const svg = document.querySelector('#svg-container svg');
+    if (!svg) return;
+
+    // SVG内のすべての描画パーツ（rect, path, polygon）をキーとして取得
+    const elements = svg.querySelectorAll('rect, path, polygon');
+    if (elements.length === 0) return;
+
+    // 各要素の座標を測定して外列・親指クラスタを自動判別
+    let minX = Infinity;
+    let maxY = -Infinity;
+    const items = [];
+
+    elements.forEach(el => {
+      const box = el.getBBox();
+      minX = Math.min(minX, box.x);
+      maxY = Math.max(maxY, box.y);
+      items.push({ el, x: box.x, y: box.y });
+    });
+
+    items.forEach(item => {
+      // 左端付近（小指外列）または下部付近（親指クラスタ）を自動でモディファイア扱いに
+      if (item.x < minX + 22 || item.y > maxY - 25) {
+        item.el.classList.add('is-mod');
+      }
+    });
+  }
+
   function applyScale() {
     const svg = document.querySelector('#svg-container svg');
     if (!svg) return;
-    
-    // ErgogenのSVGのviewBoxから実際の物理幅(mm)を取得
     const vb = svg.viewBox.baseVal;
     const widthMm = vb && vb.width ? vb.width : parseFloat(svg.getAttribute('width'));
     const heightMm = vb && vb.height ? vb.height : parseFloat(svg.getAttribute('height'));
-    
     const pxPerMm = SCALE_FACTORS[currentDevice];
     svg.setAttribute('width', (widthMm * pxPerMm) + 'px');
     svg.setAttribute('height', (heightMm * pxPerMm) + 'px');
   }
 
-  // パームリジェクション ＆ タッチインタラクション
-  const activeKeys = new Map();
+  // マルチタッチ＆同時押しトラッキング
+  const activeTouchMap = new Map(); // touch.identifier -> DOM element
 
   window.addEventListener('touchstart', handleTouch, { passive: false });
-  window.addEventListener('touchmove', handleTouch, { passive: false });
   window.addEventListener('touchend', handleTouchEnd, { passive: false });
   window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
-
- 
   function handleTouch(e) {
-    // ツールバー（ボタンやファイル選択）のタップ時はキーボード処理をせず、標準のクリックを通す
     if (e.target.closest('#toolbar')) return;
-
     e.preventDefault();
+    resumeAudio();
+
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
-
-      // パームリジェクション判定
       const radius = touch.radiusX || touch.webkitRadiusX || 10;
-      if (radius > 22) continue; 
+      if (radius > 24) continue; // パーム排除
 
-      const target = document.elementFromPoint(touch.clientX, touch.clientY);
-      if (target && (target.tagName === 'rect' || target.tagName === 'path') && target.closest('#svg-container')) {
-        if (!activeKeys.has(touch.identifier) || activeKeys.get(touch.identifier) !== target) {
-          if (activeKeys.has(touch.identifier)) {
-            activeKeys.get(touch.identifier).classList.remove('key-pressed');
-          }
+      // タッチされたキーを特定
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      const target = el ? el.closest('rect, path, polygon') : null;
+
+      if (target && target.closest('#svg-container')) {
+        // キー割当切替モード時：通常 ⇄ モディファイアを反転
+        if (isEditMode) {
+          target.classList.toggle('is-mod');
+          playNormalSound();
+          return;
+        }
+
+        activeTouchMap.set(touch.identifier, target);
+
+        // 現在押されている他のキーにモディファイア（親指/外列）が含まれているか確認
+        let hasActiveMod = false;
+        activeTouchMap.forEach((pressedEl) => {
+          if (pressedEl.classList.contains('is-mod')) hasActiveMod = true;
+        });
+
+        if (target.classList.contains('is-mod')) {
+          // モディファイアキー自体を押した時
           target.classList.add('key-pressed');
-          activeKeys.set(touch.identifier, target);
-          playKeyClick();
+          playModSound();
+        } else if (hasActiveMod) {
+          // ★ 親指や外列を押しながら通常キーを叩いた時（コンビネーション打鍵）
+          target.classList.add('combo-pressed');
+          playComboSound();
+        } else {
+          // 通常キー単体
+          target.classList.add('key-pressed');
+          playNormalSound();
         }
       }
     }
   }
 
   function handleTouchEnd(e) {
-    // ツールバー内のタッチ終了時は無視
     if (e.target.closest('#toolbar')) return;
 
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
-      if (activeKeys.has(touch.identifier)) {
-        activeKeys.get(touch.identifier).classList.remove('key-pressed');
-        activeKeys.delete(touch.identifier);
+      if (activeTouchMap.has(touch.identifier)) {
+        const target = activeTouchMap.get(touch.identifier);
+        target.classList.remove('key-pressed', 'combo-pressed');
+        activeTouchMap.delete(touch.identifier);
       }
     }
   }
- 
 </script>
 </body>
 </html>
