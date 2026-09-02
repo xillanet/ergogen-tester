@@ -42,11 +42,20 @@
   #stage {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     display: flex; justify-content: center; align-items: center;
+    overflow: hidden;
   }
   #svg-container { transform-origin: center center; }
   #svg-container svg { overflow: visible; }
   
-  /* 通常キー：落ち着いたチャコールグレー */
+  /* SVG内部の余計なテキスト・メタ情報を完全非表示化 */
+  #svg-container text,
+  #svg-container desc,
+  #svg-container metadata,
+  #svg-container title {
+    display: none !important;
+  }
+
+  /* 通常キー（チャコールグレー） */
   #svg-container path, #svg-container rect, #svg-container polygon {
     pointer-events: all !important;
     fill: #2c313c !important;
@@ -54,13 +63,13 @@
     stroke-width: 1.5px !important;
   }
 
-  /* 親指・外列（モディファイアキー）：インディゴブルー */
+  /* 親指・外列（インディゴブルー） */
   #svg-container .is-mod {
     fill: #1d3557 !important;
     stroke: #457b9d !important;
   }
 
-  /* 単体タップ（通常：エメラルドグリーン / モディファイア：シアン） */
+  /* 単体タップ（通常：緑 / モディファイア：青） */
   #svg-container .key-pressed {
     fill: #10b981 !important;
     stroke: #ffffff !important;
@@ -69,7 +78,7 @@
     fill: #00b4d8 !important;
     stroke: #ffffff !important;
   }
-  /* ★ 同時押し（コンビネーション打鍵）：鮮やかなアンバーゴールド */
+  /* 同時押し（アンバーゴールド） */
   #svg-container .combo-pressed {
     fill: #f59e0b !important;
     stroke: #ffffff !important;
@@ -115,6 +124,241 @@
     osc.frequency.exponentialRampToValueAtTime(45, audioCtx.currentTime + 0.04);
     gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.04);
+  }
+
+  function playModSound() {
+    resumeAudio();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(95, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.05);
+    gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.05);
+  }
+
+  function playComboSound() {
+    resumeAudio();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(660, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.18);
+  }
+
+  function setStatus(text) {
+    document.getElementById('debug-status').innerText = text;
+  }
+
+  function setPreset(device) {
+    currentDevice = device;
+    document.getElementById('btn-mini').className = device === 'mini' ? 'active' : '';
+    document.getElementById('btn-air').className = device === 'air' ? 'active' : '';
+    applyScale();
+  }
+  setPreset('mini');
+
+  function toggleEditMode() {
+    resumeAudio();
+    isEditMode = !isEditMode;
+    const btn = document.getElementById('btn-mode');
+    btn.className = isEditMode ? 'mode-toggle active' : 'mode-toggle';
+    btn.innerText = isEditMode ? '🔧 キー割当切替: ON' : '🔧 キー割当切替: OFF';
+    setStatus(isEditMode ? 'キーをタップして色(役割)を反転' : '打鍵テスト中');
+  }
+
+  function togglePalm() {
+    resumeAudio();
+    isPalmFilterOn = !isPalmFilterOn;
+    const btn = document.getElementById('btn-palm');
+    btn.className = isPalmFilterOn ? 'palm-btn' : 'palm-btn off';
+    btn.innerText = isPalmFilterOn ? '🖐 パーム保護: ON' : '🖐 パーム保護: OFF';
+    setStatus(isPalmFilterOn ? 'パーム保護: 有効' : 'パーム保護: 完全無効');
+  }
+
+  // 結合されたErgogenのSVGパスを個別のキー要素へ分解
+  function decomposeSvgPaths(svg) {
+    const paths = Array.from(svg.querySelectorAll('path'));
+    paths.forEach(pathEl => {
+      const d = pathEl.getAttribute('d');
+      if (!d) return;
+
+      const subpaths = d.match(/[Mm][^Mm]+/g);
+      if (subpaths && subpaths.length > 1) {
+        const parent = pathEl.parentNode;
+        subpaths.forEach(subD => {
+          const newPath = document.createElementNS('[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)', 'path');
+          newPath.setAttribute('d', subD.trim());
+          parent.insertBefore(newPath, pathEl);
+        });
+        parent.removeChild(pathEl);
+      }
+    });
+  }
+
+  // DOMParserによる安全なSVG抽出とゴミの排除
+  document.getElementById('file-input').addEventListener('change', function(e) {
+    resumeAudio();
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      const rawText = evt.target.result;
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(rawText, 'image/svg+xml');
+      const svg = doc.querySelector('svg');
+
+      if (!svg) {
+        setStatus('SVGの解析に失敗しました');
+        return;
+      }
+
+      // メタデータ・テキストタグ・不要ノードを完全除去
+      svg.querySelectorAll('desc, metadata, title, text').forEach(el => el.remove());
+
+      const container = document.getElementById('svg-container');
+      container.innerHTML = '';
+      container.appendChild(svg);
+
+      decomposeSvgPaths(svg);
+      setupKeyElements(svg);
+      applyScale();
+    };
+    reader.readAsText(file);
+  });
+
+  function setupKeyElements(svg) {
+    const elements = svg.querySelectorAll('rect, path, polygon');
+    if (elements.length === 0) {
+      setStatus('キーが検出できません');
+      return;
+    }
+
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    const items = [];
+
+    elements.forEach(el => {
+      const box = el.getBBox();
+      const cx = box.x + box.width / 2;
+      const cy = box.y + box.height / 2;
+      minX = Math.min(minX, cx);
+      maxX = Math.max(maxX, cx);
+      minY = Math.min(minY, cy);
+      maxY = Math.max(maxY, cy);
+      items.push({ el, cx, cy });
+    });
+
+    const totalWidth = maxX - minX;
+    const totalHeight = maxY - minY;
+
+    items.forEach(item => {
+      const isOuterCol = (item.cx - minX) < (totalWidth * 0.19);
+      const isThumbCluster = (maxY - item.cy) < (totalHeight * 0.24);
+
+      if (isOuterCol || isThumbCluster) {
+        item.el.classList.add('is-mod');
+      } else {
+        item.el.classList.remove('is-mod');
+      }
+    });
+
+    setStatus(`読込成功: ${elements.length} 個のキーを検出`);
+  }
+
+  function applyScale() {
+    const svg = document.querySelector('#svg-container svg');
+    if (!svg) return;
+    const vb = svg.viewBox.baseVal;
+    const widthMm = vb && vb.width ? vb.width : parseFloat(svg.getAttribute('width'));
+    const heightMm = vb && vb.height ? vb.height : parseFloat(svg.getAttribute('height'));
+    const pxPerMm = SCALE_FACTORS[currentDevice];
+    svg.setAttribute('width', (widthMm * pxPerMm) + 'px');
+    svg.setAttribute('height', (heightMm * pxPerMm) + 'px');
+  }
+
+  const activeTouchMap = new Map();
+
+  window.addEventListener('touchstart', handleTouch, { passive: false });
+  window.addEventListener('touchend', handleTouchEnd, { passive: false });
+  window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+  function handleTouch(e) {
+    if (e.target.closest('#toolbar')) return;
+    e.preventDefault();
+    resumeAudio();
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+
+      if (isPalmFilterOn) {
+        const radius = touch.radiusX || touch.webkitRadiusX || 0;
+        if (radius > 60) continue;
+      }
+
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      const target = el ? el.closest('rect, path, polygon') : null;
+
+      if (target && target.closest('#svg-container')) {
+        if (isEditMode) {
+          target.classList.toggle('is-mod');
+          playNormalSound();
+          setStatus(`キー反転: ${target.classList.contains('is-mod') ? '外列/親指(青)' : '通常(灰)'}`);
+          continue;
+        }
+
+        activeTouchMap.set(touch.identifier, target);
+
+        let hasActiveMod = false;
+        activeTouchMap.forEach((pressedEl) => {
+          if (pressedEl.classList.contains('is-mod')) hasActiveMod = true;
+        });
+
+        if (target.classList.contains('is-mod')) {
+          target.classList.add('key-pressed');
+          playModSound();
+          setStatus('外列/親指キー');
+        } else if (hasActiveMod) {
+          target.classList.add('combo-pressed');
+          playComboSound();
+          setStatus('★ コンビネーション同時押し！');
+        } else {
+          target.classList.add('key-pressed');
+          playNormalSound();
+          setStatus('通常キー');
+        }
+      }
+    }
+  }
+
+  function handleTouchEnd(e) {
+    if (e.target.closest('#toolbar')) return;
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      if (activeTouchMap.has(touch.identifier)) {
+        const target = activeTouchMap.get(touch.identifier);
+        target.classList.remove('key-pressed', 'combo-pressed');
+        activeTouchMap.delete(touch.identifier);
+      }
+    }
+  }
+</script>
+</body>
+</html>    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
     osc.connect(gain);
     gain.connect(audioCtx.destination);
     osc.start();
