@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Ergogen iPad Tester</title>
+<style>
+  * { box-sizing: border-box; touch-action: none; -webkit-user-select: none; user-select: none; }
+  body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background: #121212; font-family: -apple-system, sans-serif; color: #fff; }
+  
+  #toolbar {
+    position: absolute; top: 12px; left: 12px; z-index: 100;
+    display: flex; gap: 8px; align-items: center; background: rgba(30,30,30,0.85);
+    padding: 8px 12px; border-radius: 12px; backdrop-filter: blur(10px);
+  }
+  button, label {
+    background: #2c2c2e; color: #fff; border: 1px solid #3a3a3c;
+    padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  button.active { background: #0a84ff; border-color: #0a84ff; }
+  input[type="file"] { display: none; }
+
+  #stage {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; justify-content: center; align-items: center;
+  }
+  #svg-container { transform-origin: center center; }
+  #svg-container svg { overflow: visible; }
+  #svg-container rect, #svg-container path {
+    fill: #242426; stroke: #48484a; stroke-width: 1px; transition: fill 0.05s, transform 0.05s;
+  }
+  .key-pressed { fill: #30d158 !important; stroke: #fff !important; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <label for="file-input">📂 SVG読込</label>
+  <input type="file" id="file-input" accept=".svg">
+  <button id="btn-mini" onclick="setPreset('mini')">iPad mini</button>
+  <button id="btn-air" onclick="setPreset('air')">iPad Air</button>
+  <span style="font-size: 12px; color: #8e8e93; margin-left: 4px;">音: ON / パーム排除: ON</span>
+</div>
+
+<div id="stage">
+  <div id="svg-container"></div>
+</div>
+
+<script>
+  // iPadのCSSピクセルあたりのmm換算（物理PPI / devicePixelRatio / 25.4）
+  // iPad mini (8.3"): 326ppi / 2 = 163pt/in -> 6.417 px/mm
+  // iPad Air (10.9"/11"): 264ppi / 2 = 132pt/in -> 5.197 px/mm
+  const SCALE_FACTORS = {
+    mini: 6.4173,
+    air: 5.1969
+  };
+  let currentDevice = 'mini';
+
+  // Web Audio API による打鍵音（メカニカル風のクリック音）
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function playKeyClick() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(140, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.03);
+    gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.03);
+  }
+
+  function setPreset(device) {
+    currentDevice = device;
+    document.getElementById('btn-mini').className = device === 'mini' ? 'active' : '';
+    document.getElementById('btn-air').className = device === 'air' ? 'active' : '';
+    applyScale();
+  }
+  setPreset('mini');
+
+  // SVGの読み込み
+  document.getElementById('file-input').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+      const container = document.getElementById('svg-container');
+      container.innerHTML = evt.target.result;
+      applyScale();
+    };
+    reader.readAsText(file);
+  });
+
+  function applyScale() {
+    const svg = document.querySelector('#svg-container svg');
+    if (!svg) return;
+    
+    // ErgogenのSVGのviewBoxから実際の物理幅(mm)を取得
+    const vb = svg.viewBox.baseVal;
+    const widthMm = vb && vb.width ? vb.width : parseFloat(svg.getAttribute('width'));
+    const heightMm = vb && vb.height ? vb.height : parseFloat(svg.getAttribute('height'));
+    
+    const pxPerMm = SCALE_FACTORS[currentDevice];
+    svg.setAttribute('width', (widthMm * pxPerMm) + 'px');
+    svg.setAttribute('height', (heightMm * pxPerMm) + 'px');
+  }
+
+  // パームリジェクション ＆ タッチインタラクション
+  const activeKeys = new Map();
+
+  window.addEventListener('touchstart', handleTouch, { passive: false });
+  window.addEventListener('touchmove', handleTouch, { passive: false });
+  window.addEventListener('touchend', handleTouchEnd, { passive: false });
+  window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+  function handleTouch(e) {
+    e.preventDefault();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+
+      // パームリジェクション判定：
+      // 指の接地面積（radius）が大きい場合（手首や母指球）は無視
+      const radius = touch.radiusX || touch.webkitRadiusX || 10;
+      if (radius > 22) continue; 
+
+      const target = document.elementFromPoint(touch.clientX, touch.clientY);
+      if (target && (target.tagName === 'rect' || target.tagName === 'path') && target.closest('#svg-container')) {
+        if (!activeKeys.has(touch.identifier) || activeKeys.get(touch.identifier) !== target) {
+          if (activeKeys.has(touch.identifier)) {
+            activeKeys.get(touch.identifier).classList.remove('key-pressed');
+          }
+          target.classList.add('key-pressed');
+          activeKeys.set(touch.identifier, target);
+          playKeyClick();
+        }
+      }
+    }
+  }
+
+  function handleTouchEnd(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      if (activeKeys.has(touch.identifier)) {
+        activeKeys.get(touch.identifier).classList.remove('key-pressed');
+        activeKeys.delete(touch.identifier);
+      }
+    }
+  }
+</script>
+</body>
+</html>
