@@ -10,12 +10,15 @@
   * { box-sizing: border-box; touch-action: none; -webkit-user-select: none; user-select: none; }
   body, html { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background: #121212; font-family: -apple-system, sans-serif; color: #fff; }
   
-  #toolbar {
+#toolbar {
     position: absolute; top: 12px; left: 12px; z-index: 100;
     display: flex; gap: 8px; align-items: center; background: rgba(30,30,30,0.85);
     padding: 8px 12px; border-radius: 12px; backdrop-filter: blur(10px);
+    touch-action: auto; /* 追加 */
   }
-  button, label {
+  #toolbar * {
+    touch-action: auto; /* 追加 */
+  }  button, label {
     background: #2c2c2e; color: #fff; border: 1px solid #3a3a3c;
     padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
   }
@@ -118,13 +121,17 @@
   window.addEventListener('touchend', handleTouchEnd, { passive: false });
   window.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
+
+ 
   function handleTouch(e) {
+    // ツールバー（ボタンやファイル選択）のタップ時はキーボード処理をせず、標準のクリックを通す
+    if (e.target.closest('#toolbar')) return;
+
     e.preventDefault();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
 
-      // パームリジェクション判定：
-      // 指の接地面積（radius）が大きい場合（手首や母指球）は無視
+      // パームリジェクション判定
       const radius = touch.radiusX || touch.webkitRadiusX || 10;
       if (radius > 22) continue; 
 
@@ -143,6 +150,9 @@
   }
 
   function handleTouchEnd(e) {
+    // ツールバー内のタッチ終了時は無視
+    if (e.target.closest('#toolbar')) return;
+
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       if (activeKeys.has(touch.identifier)) {
@@ -151,6 +161,7 @@
       }
     }
   }
+ 
 </script>
 </body>
 </html>
